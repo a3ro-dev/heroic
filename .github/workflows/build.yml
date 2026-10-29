@@ -98,9 +98,8 @@ jobs:
         run: mkdir -p ~/.android && echo "$KEYSTORE" | base64 -d > ~/.android/debug.keystore
       # Release build, debug-signed (see app/build.gradle.kts) so it installs straight from the release
       # page. versionCode climbs every run, past local builds (1000), so the app can tell a newer one.
-      - run: npx tauri android build --apk --target aarch64 --target x86_64 --config "{\"bundle\":{\"android\":{\"versionCode\":$VERSION_CODE}}}"
-        env:
-          NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/${{ env.NDK_VERSION }}
+      # ANDROID_HOME comes from the runner's shell, which ${{ env }} can't see
+      - run: NDK_HOME="$ANDROID_HOME/ndk/$NDK_VERSION" npx tauri android build --apk --target aarch64 --target x86_64 --config "{\"bundle\":{\"android\":{\"versionCode\":$VERSION_CODE}}}"
       - run: cp src-tauri/gen/android/app/build/outputs/apk/universal/release/*.apk heroic-android.apk
       - uses: actions/upload-artifact@v4
         with:
