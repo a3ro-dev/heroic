@@ -9,3 +9,5 @@ src-tauri/gen/schemas/
 *.zip
 /textures/
 Read+Me.txt
+public/test/
+.claude/

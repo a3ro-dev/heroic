@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="dark" />
+    <title>Heroic</title>
+    <script type="module" src="/src/main.ts"></script>
+  </head>
+  <body>
+    <main id="stage" aria-label="Camera preview">
+      <video id="video" playsinline muted></video>
+      <div id="view"></div>
+      <div id="people" aria-hidden="true"></div>
+      <div id="scan" aria-hidden="true"></div>
+
+      <div id="boot" role="status" aria-live="polite">
+        <p class="boot-title">Heroic</p>
+        <p id="boot-step">Starting the camera</p>
+        <div class="boot-bar"><span></span></div>
+        <div id="boot-error" hidden>
+          <p id="boot-error-text"></p>
+          <button id="boot-retry" class="btn">Try again</button>
+        </div>
+      </div>
+    </main>
+
+    <header id="top">
+      <div class="brand">
+        <span class="wordmark">Heroic</span>
+        <span id="status" class="status" aria-live="polite">Looking for you</span>
+      </div>
+      <div class="top-actions">
+        <button id="live" class="btn live" aria-pressed="false" hidden>
+          <span class="tally" aria-hidden="true"></span><span class="live-label">Go live</span>
+        </button>
+        <button id="open-settings" class="icon-btn" aria-label="Settings" aria-controls="settings" aria-expanded="false">
+          <i data-lucide="settings-2"></i>
+        </button>
+      </div>
+    </header>
+
+    <nav id="rail" aria-label="Heroes">
+      <ul id="heroes" role="listbox" aria-label="Choose a hero"></ul>
+      <label class="hero-card add" title="Load your own rigged .glb model">
+        <input id="add-hero" type="file" accept=".glb,.gltf" />
+        <i data-lucide="plus"></i>
+        <span class="hero-name">Your own</span>
+        <span class="hero-note">.glb with a skeleton</span>
+      </label>
+    </nav>
+
+    <aside id="settings" aria-label="Settings" hidden>
+      <div class="sheet-head">
+        <h2>Settings</h2>
+        <button id="close-settings" class="icon-btn" aria-label="Close settings"><i data-lucide="x"></i></button>
+      </div>
+
+      <section>
+        <h3>Camera</h3>
+        <label class="field">
+          <span>Device</span>
+          <select id="camera"></select>
+        </label>
+        <label class="toggle">
+          <input id="mirror" type="checkbox" checked />
+          <span>Mirror my preview</span>
+          <small>Only your view. Meetings always get the true image.</small>
+        </label>
+      </section>
+
+      <section>
+        <h3>Fit</h3>
+        <label class="field">
+          <span>Steadiness <output id="stability-out"></output></span>
+          <input id="stability" type="range" min="0" max="1" step="0.05" value="0.6" />
+        </label>
+        <label class="field">
+          <span>Suit size <output id="build-out"></output></span>
+          <input id="build" type="range" min="0.9" max="1.4" step="0.01" value="1.08" />
+        </label>
+        <label class="toggle">
+          <input id="cover-head" type="checkbox" checked />
+          <span>Cover my head</span>
+          <small>Grows a small hero head so your own never shows around it.</small>
+        </label>
+      </section>
+
+      <section>
+        <h3>Disappear</h3>
+        <label class="toggle">
+          <input id="cloak" type="checkbox" />
+          <span>Paint me out</span>
+          <small>Fills in around the hero with your empty room, so only the hero is visible.</small>
+        </label>
+        <button id="plate" class="btn quiet">
+          <i data-lucide="scan-line"></i><span id="plate-label">Capture empty room</span>
+        </button>
+        <p class="hint" id="plate-hint">Step out of frame, then capture. Five seconds to get clear.</p>
+      </section>
+
+      <section id="vcam-help">
+        <h3>Using it in calls</h3>
+        <p class="hint" id="vcam-text"></p>
+      </section>
+    </aside>
+
+    <div id="toast" role="status" aria-live="polite"></div>
+  </body>
+</html>

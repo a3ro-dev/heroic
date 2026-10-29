@@ -4,14 +4,20 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
+    "predev": "node scripts/fetch-assets.mjs",
     "dev": "vite",
+    "prebuild": "node scripts/fetch-assets.mjs",
     "build": "tsc --noEmit && vite build",
     "tauri": "tauri",
-    "test": "node --test src/**/*.test.ts"
+    "test": "node --test src/*.test.ts",
+    "heroes": "node tools/build_heroes.mjs"
   },
   "dependencies": {
+    "@fontsource-variable/geist": "^5.3.0",
+    "@fontsource-variable/geist-mono": "^5.3.0",
     "@mediapipe/tasks-vision": "^1.2.0",
     "@tauri-apps/api": "^2.12.4",
+    "lucide": "^1.64.0",
     "three": "^0.186.1"
   },
   "devDependencies": {
