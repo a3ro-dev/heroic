@@ -8,7 +8,7 @@ import { join } from "node:path";
 
 const blender = process.env.BLENDER ?? "blender";
 const src = process.env.HERO_SRC ?? ".";
-const sources = { hulk: "Hulk_BND_RIG.blend", "infinity-ultron": "Infinity+Ultron.blend", "ultron-prime": "ultron+xps.blend", "spider-man": "tasm1rig.blend" };
+const sources = { hulk: "Hulk_BND_RIG.blend", "infinity-ultron": "Infinity+Ultron.blend", "ultron-prime": "ultron+xps.blend" };
 const raw = join(tmpdir(), "heroic-raw");
 mkdirSync(raw, { recursive: true });
 mkdirSync("public/heroes", { recursive: true });
