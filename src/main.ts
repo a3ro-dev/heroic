@@ -1,6 +1,6 @@
 import "./style.css";
 import { invoke, isTauri } from "@tauri-apps/api/core";
-import { createIcons, Plus, ScanLine, Settings2, X } from "lucide";
+import { createIcons, Plus, RefreshCw, ScanLine, Settings2, X } from "lucide";
 import { HEROES, type Hero } from "./heroes";
 import { Stage } from "./stage";
 import { Tracker, type Candidate, type TrackResult } from "./tracker";
@@ -15,7 +15,7 @@ const toastEl = $("toast");
 const isAndroid = /Android/i.test(navigator.userAgent);
 const canLive = isTauri() && !isAndroid;
 
-createIcons({ icons: { Plus, ScanLine, Settings2, X } });
+createIcons({ icons: { Plus, RefreshCw, ScanLine, Settings2, X } });
 
 // ---------- settings, remembered between runs ----------
 
@@ -28,6 +28,7 @@ const prefs = {
   coverHead: true,
   vanish: true,
   hd: false,
+  autoUpdate: true,
   ...JSON.parse(localStorage.getItem("heroic.prefs") ?? "{}"),
 };
 const save = () => localStorage.setItem("heroic.prefs", JSON.stringify(prefs));
@@ -412,7 +413,7 @@ camSel.onchange = async () => {
   }
 };
 
-function bindToggle(id: string, key: "mirror" | "coverHead" | "vanish" | "hd", apply: (v: boolean) => void) {
+function bindToggle(id: string, key: "mirror" | "coverHead" | "vanish" | "hd" | "autoUpdate", apply: (v: boolean) => void) {
   const el = $<HTMLInputElement>(id);
   el.checked = prefs[key];
   el.onchange = () => {
@@ -477,6 +478,18 @@ document.addEventListener("visibilitychange", () => {
   const live = (video.srcObject as MediaStream | null)?.getVideoTracks().some((t) => t.readyState === "live");
   if (!live) startCamera().catch((e) => toast(cameraError(e)));
 });
+
+// ---------- self-update (Android app only; the native side lives in Updater.kt) ----------
+
+const updater = (window as unknown as { HeroicUpdater?: { available(): boolean; build(): number; check(quiet: boolean): void } }).HeroicUpdater;
+if (updater?.available()) {
+  $("updates").hidden = false;
+  $("build-no").textContent = String(updater.build());
+  (window as unknown as { onHeroicUpdate: (state: string, msg: string) => void }).onHeroicUpdate = (_state, msg) => toast(msg);
+  $("check-update").onclick = () => updater.check(false);
+  bindToggle("auto-update", "autoUpdate", () => {});
+  if (prefs.autoUpdate) updater.check(true);
+}
 
 renderHeroes(prefs.hero);
 boot();

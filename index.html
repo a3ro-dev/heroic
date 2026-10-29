@@ -104,6 +104,19 @@
         <p class="hint">Optional. Step out of frame for a clean result from the first second instead of after you've moved around.</p>
       </section>
 
+      <section id="updates" hidden>
+        <h3>Updates</h3>
+        <label class="toggle">
+          <input id="auto-update" type="checkbox" checked />
+          <span>Update automatically</span>
+          <small>Checks for a newer build each time Heroic opens. Android asks you before installing.</small>
+        </label>
+        <button id="check-update" class="btn quiet">
+          <i data-lucide="refresh-cw"></i><span>Check for updates</span>
+        </button>
+        <p class="hint">You're on build <span id="build-no"></span>.</p>
+      </section>
+
       <section id="vcam-help">
         <h3>Using it in calls</h3>
         <p class="hint" id="vcam-text"></p>
