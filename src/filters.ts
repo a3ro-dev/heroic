@@ -26,7 +26,12 @@ export class OneEuro {
 
   /** Filters `v` in place. `t` is in seconds. */
   filter(v: ArrayLike<number> & { [i: number]: number }, t: number) {
-    if (!this.x || t <= this.t) {
+    if (this.x && t === this.t) {
+      // same sample again (its model didn't run this frame): hold, don't treat it as motion
+      for (let i = 0; i < this.size; i++) v[i] = this.x[i];
+      return v;
+    }
+    if (!this.x || t < this.t) {
       this.x = Float64Array.from(v);
       this.dx.fill(0);
       this.t = t;

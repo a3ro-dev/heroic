@@ -41,6 +41,8 @@ interface VisionResult {
   face: Pick<FaceLandmarkerResult, "faceLandmarks" | "faceBlendshapes" | "facialTransformationMatrixes">;
   hands: Pick<HandLandmarkerResult, "landmarks" | "worldLandmarks">;
   masks: ({ data: Uint8Array; width: number; height: number } | null)[];
+  /** capture time (s) of each model's latest result, so filters see each sample once */
+  at: { pose: number; face: number; hands: number };
 }
 
 async function create<T>(make: (delegate: "GPU" | "CPU") => Promise<T>): Promise<T> {
@@ -79,6 +81,7 @@ export class Tracker {
     face: { faceLandmarks: [], faceBlendshapes: [], facialTransformationMatrixes: [] },
     hands: { landmarks: [], worldLandmarks: [] },
     masks: [],
+    at: { pose: 0, face: 0, hands: 0 },
   };
 
   // who we're following
@@ -189,6 +192,7 @@ export class Tracker {
       this.smallCtx.drawImage(video, 0, 0, sw, sh);
       const p = this.pose.detectForVideo(this.small, nowMs);
       L.pose = { landmarks: p.landmarks, world: p.worldLandmarks };
+      L.at.pose = nowMs / 1000;
       L.masks = (p.segmentationMasks ?? []).map((m) => {
         const out = this.wantMask ? { data: m.getAsUint8Array(), width: m.width, height: m.height } : null;
         m.close();
@@ -197,15 +201,17 @@ export class Tracker {
       ema("pose", t0);
     } else {
       L.face = this.face.detectForVideo(video, nowMs);
+      L.at.face = L.at.hands = nowMs / 1000;
       ema("face", t0);
       const t1 = performance.now();
       L.hands = this.hands.detectForVideo(video, nowMs);
       ema("hands", t1);
     }
-    return this.process(L, nowMs / 1000, video.videoWidth / video.videoHeight);
+    return this.process(L, video.videoWidth / video.videoHeight);
   }
 
-  private process(r: VisionResult, t: number, aspect: number): TrackResult {
+  private process(r: VisionResult, aspect: number): TrackResult {
+    const t = r.at.pose;
     const pose = { landmarks: r.pose.landmarks, worldLandmarks: r.pose.world };
     const face = r.face;
     const hands = r.hands;
@@ -282,7 +288,7 @@ export class Tracker {
         for (const [side, wr] of [["L", 15], ["R", 16]] as const) {
           if (Math.hypot(hlm[0].x - lm[wr].x, hlm[0].y - lm[wr].y) < 0.08 && !person.hands[side]) {
             const pts = hands.worldLandmarks[hi].map((p) => toCam(p));
-            person.hands[side] = this.fHand[side].filter(pts, t);
+            person.hands[side] = this.fHand[side].filter(pts, r.at.hands);
             return;
           }
         }
@@ -297,7 +303,7 @@ export class Tracker {
         const q = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().fromArray(mat.data));
         if (q.dot(this.qPrev) < 0) q.set(-q.x, -q.y, -q.z, -q.w); // stay on one hemisphere for filtering
         const arr = [q.x, q.y, q.z, q.w];
-        this.fFaceQ.filter(arr, t);
+        this.fFaceQ.filter(arr, r.at.face);
         person.faceQ = new THREE.Quaternion(arr[0], arr[1], arr[2], arr[3]).normalize();
         this.qPrev.copy(person.faceQ);
       }
@@ -305,7 +311,7 @@ export class Tracker {
       for (const c of face.faceBlendshapes[faceIdx]?.categories ?? []) {
         let f = this.fBlend.get(c.categoryName);
         if (!f) this.fBlend.set(c.categoryName, (f = new OneEuro(1, 1.5, 2)));
-        blend.set(c.categoryName, f.filter([c.score], t)[0]);
+        blend.set(c.categoryName, f.filter([c.score], r.at.face)[0]);
       }
       person.blend = blend;
 
@@ -318,7 +324,7 @@ export class Tracker {
         const z = -((focal() / aspect) * 0.15) / Math.max(w, 1e-3) - 0.04;
         const c = unproject(toNdc((a.x + b.x) / 2, (a.y + b.y) / 2), z, aspect);
         const arr = [c.x, c.y, c.z];
-        this.fFacePos.filter(arr, t);
+        this.fFacePos.filter(arr, r.at.face);
         person.faceCenter = { x: arr[0], y: arr[1], z: arr[2] };
       }
     }
