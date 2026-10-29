@@ -76,8 +76,10 @@ jobs:
     runs-on: ubuntu-latest
     env:
       NDK_VERSION: 27.0.12077973
+      KEYSTORE: ${{ secrets.ANDROID_DEBUG_KEYSTORE }}
     steps:
       - uses: actions/checkout@v4
+      - run: echo "VERSION_CODE=$((1000 + GITHUB_RUN_NUMBER))" >> "$GITHUB_ENV"
       - uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: 17 }
       # the runner ships the SDK; setup-android's sdkmanager bootstrap breaks on it
@@ -90,10 +92,16 @@ jobs:
       - uses: swatinem/rust-cache@v2
         with: { workspaces: "src-tauri -> target" }
       - run: npm ci
-      # Debug-signed so it installs straight from the release page; no keystore needed.
-      - run: npx tauri android build --apk --debug --target aarch64 --target x86_64
+      # Self-update only installs APKs signed with the same key, so every build uses the one
+      # debug keystore kept in secrets instead of a fresh one per runner.
+      - if: env.KEYSTORE != ''
+        run: mkdir -p ~/.android && echo "$KEYSTORE" | base64 -d > ~/.android/debug.keystore
+      # Debug-signed so it installs straight from the release page. versionCode climbs every run,
+      # past local builds (1000), so the app can tell a newer build apart.
+      - run: npx tauri android build --apk --debug --target aarch64 --target x86_64 --config "{\"bundle\":{\"android\":{\"versionCode\":$VERSION_CODE}}}"
         env:
           NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/${{ env.NDK_VERSION }}
+          HEROIC_UPDATE_TOKEN: ${{ secrets.HEROIC_UPDATE_TOKEN }}
       - run: cp src-tauri/gen/android/app/build/outputs/apk/universal/debug/*.apk heroic-android.apk
       - uses: actions/upload-artifact@v4
         with:
@@ -103,3 +111,10 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: heroic-android.apk
+      # The feed the app's updater reads: one rolling pre-release, titled with its versionCode.
+      - if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete android-nightly --cleanup-tag --yes || true
+          gh release create android-nightly heroic-android.apk --prerelease --target "$GITHUB_SHA" --title "Android build $VERSION_CODE" --notes "Latest Android build from main. The app updates itself from here."
