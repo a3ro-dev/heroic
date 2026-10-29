@@ -78,6 +78,8 @@ export class Avatar {
   private morphs: { mesh: THREE.Mesh; index: Map<string, number> }[] = [];
   private scale = 0;
   private legShow: Record<Side, number> = { L: 0, R: 0 };
+  private held = new Map<THREE.Object3D, { p: THREE.Vector3; q: THREE.Quaternion; s: THREE.Vector3 }>();
+  private heldAt = 0;
   opts: AvatarOptions = { build: 1.08, coverHead: true };
 
   constructor(readonly model: THREE.Object3D) {
@@ -277,6 +279,27 @@ export class Avatar {
 
     this.place(f);
     this.applyMorphs(f.blend);
+    this.ease();
+  }
+
+  /** Eases every bone toward this frame's pose, so 15-30 Hz tracking reads as smooth motion at
+   *  display rate instead of stepping. About 30 ms of lag; snaps after a gap. */
+  private ease() {
+    const now = performance.now();
+    const dt = (now - this.heldAt) / 1000;
+    this.heldAt = now;
+    const a = dt > 0.25 ? 1 : 1 - Math.exp(-dt * 30);
+    for (const o of [this.root, ...this.bones]) {
+      let h = this.held.get(o);
+      if (!h) this.held.set(o, (h = { p: o.position.clone(), q: o.quaternion.clone(), s: o.scale.clone() }));
+      h.p.lerp(o.position, a);
+      h.q.slerp(o.quaternion, a);
+      h.s.lerp(o.scale, a);
+      o.position.copy(h.p);
+      o.quaternion.copy(h.q);
+      o.scale.copy(h.s);
+    }
+    this.root.updateMatrixWorld(true);
   }
 
   private limbs(s: Side, sm: SideMap, f: PersonFrame) {
