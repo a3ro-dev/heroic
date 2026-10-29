@@ -26,7 +26,8 @@ const prefs = {
   stability: 0.6,
   build: 1.08,
   coverHead: true,
-  cloak: false,
+  vanish: true,
+  hd: false,
   ...JSON.parse(localStorage.getItem("heroic.prefs") ?? "{}"),
 };
 const save = () => localStorage.setItem("heroic.prefs", JSON.stringify(prefs));
@@ -72,13 +73,14 @@ async function startCamera() {
     video: {
       deviceId: prefs.camera ? { exact: prefs.camera } : undefined,
       facingMode: prefs.camera ? undefined : "user",
-      width: { ideal: 1280 },
-      height: { ideal: 720 },
-      frameRate: { ideal: 30 },
+      width: { ideal: prefs.hd ? 1920 : 1280 },
+      height: { ideal: prefs.hd ? 1080 : 720 },
+      frameRate: { ideal: 60 },
     },
   });
   video.srcObject = stream;
   await video.play();
+  stage.resetPlate();
   stage.resize(video.videoWidth, video.videoHeight);
   await listCameras();
 }
@@ -103,6 +105,7 @@ async function listCameras() {
   );
 }
 
+let booted = false;
 async function boot() {
   $("boot-error").hidden = true;
   $("boot-step").hidden = false;
@@ -122,7 +125,7 @@ async function boot() {
     return bootFail(`Something failed while loading: ${(e as Error).message}`);
   }
   $("boot").classList.add("done");
-  if (prefs.cloak) setCloak(true);
+  booted = true;
   loop();
 }
 $("boot-retry").onclick = boot;
@@ -257,40 +260,65 @@ function sweep() {
 }
 
 // ---------- the loop ----------
-// Each camera frame goes to the vision worker; we keep a copy and draw it together with its own
-// tracking result, so the hero and the picture under it never drift apart.
+// Drawing runs on every camera frame (up to 60 fps). Tracking runs in the worker at its own pace on
+// the newest frame; the hero is posed from the latest smoothed result.
 
-let lastVideoTime = -1;
 let fps = 0;
 let lastFrameAt = performance.now();
 const stats = { track: 0, render: 0 };
 (window as unknown as { heroic: unknown }).heroic = { stats, tracker, stage };
 
-async function pump() {
-  if (tracker.busy || video.readyState < 2 || video.currentTime === lastVideoTime) return;
-  lastVideoTime = video.currentTime;
+function draw() {
   const now = performance.now();
-  const [forWorker, forScreen] = await Promise.all([createImageBitmap(video), createImageBitmap(video)]);
-  const res = await tracker.track(forWorker, now, video.videoWidth / video.videoHeight);
-  stats.track += (performance.now() - now - stats.track) * 0.1;
-  if (res) {
+  fps += (1000 / Math.max(now - lastFrameAt, 1) - fps) * 0.1;
+  lastFrameAt = now;
+  try {
+    const res = tracker.track(video, now);
+    stats.track += (performance.now() - now - stats.track) * 0.1;
     lastResult = res;
-    stage.setMask(res.mask);
+    stage.empty = res.candidates.length === 0;
+    stage.setMask(res.selected >= 0 ? res.mask : undefined);
     drawPeople(res);
+  } catch (e) {
+    console.error(e);
   }
   const r0 = performance.now();
-  stage.setFrame(forScreen);
   stage.render(lastResult?.person);
   stats.render += (performance.now() - r0 - stats.render) * 0.1;
-  fps += (1000 / Math.max(r0 - lastFrameAt, 1) - fps) * 0.1;
-  lastFrameAt = r0;
-  if (live) sendFrame(r0);
+  if (live) sendFrame(now);
 }
 
+// One draw per new camera frame. requestVideoFrameCallback where the webview has it; otherwise poll.
+type RVFC = HTMLVideoElement & { requestVideoFrameCallback?: (cb: () => void) => number };
+let lastVideoTime = -1;
 function loop() {
-  pump()
-    .catch((e) => console.error(e))
-    .finally(() => setTimeout(loop, 4));
+  const v = video as RVFC;
+  if (v.requestVideoFrameCallback && !document.hidden) {
+    v.requestVideoFrameCallback(() => {
+      draw();
+      loop();
+    });
+    return;
+  }
+  if (video.currentTime !== lastVideoTime) {
+    lastVideoTime = video.currentTime;
+    draw();
+  }
+  // rAF stops for hidden pages; timers keep the virtual camera fed while a call app is in front
+  if (document.hidden) setTimeout(loop, 1000 / 60);
+  else requestAnimationFrame(loop);
+}
+document.addEventListener("visibilitychange", () => document.hidden && loop());
+
+if (import.meta.env.DEV && testSrc) {
+  setInterval(() => {
+    const t = tracker.timing;
+    const gl = stage.renderer.getContext();
+    const dbg = gl.getExtension("WEBGL_debug_renderer_info");
+    const gpu = dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : "?";
+    const body = `${String(gpu).slice(0, 50)} | fps ${fps.toFixed(1)} track ${stats.track.toFixed(1)}ms render ${stats.render.toFixed(1)}ms | pose ${t.pose.toFixed(1)} face ${t.face.toFixed(1)} hands ${t.hands.toFixed(1)}`;
+    fetch("/__stats", { method: "POST", body }).catch(() => {});
+  }, 3000);
 }
 
 // ---------- virtual camera ----------
@@ -372,7 +400,7 @@ camSel.onchange = async () => {
   }
 };
 
-function bindToggle(id: string, key: "mirror" | "coverHead" | "cloak", apply: (v: boolean) => void) {
+function bindToggle(id: string, key: "mirror" | "coverHead" | "vanish" | "hd", apply: (v: boolean) => void) {
   const el = $<HTMLInputElement>(id);
   el.checked = prefs[key];
   el.onchange = () => {
@@ -403,23 +431,11 @@ bindToggle("cover-head", "coverHead", (v) => stage.hero && (stage.hero.opts.cove
 bindRange("stability", "stability", (v) => `${Math.round(v * 100)}%`, (v) => (tracker.stability = v));
 bindRange("build", "build", (v) => `${Math.round(v * 100)}%`, (v) => stage.hero && (stage.hero.opts.build = v));
 
-async function setCloak(on: boolean) {
-  if (on && !stage.hasPlate) {
-    toast("Capture your empty room first, then turn this on.");
-    $<HTMLInputElement>("cloak").checked = false;
-    prefs.cloak = false;
-    save();
-    return;
-  }
-  stage.cloak = on;
-  tracker.setMask(on);
-}
-$<HTMLInputElement>("cloak").checked = false;
-$<HTMLInputElement>("cloak").onchange = (e) => {
-  prefs.cloak = (e.target as HTMLInputElement).checked;
-  save();
-  setCloak(prefs.cloak);
-};
+bindToggle("vanish", "vanish", (v) => {
+  stage.vanish = v;
+  tracker.setMask(v).catch((e) => toast(`Couldn't start the person mask: ${e.message}`));
+});
+bindToggle("hd", "hd", () => booted && startCamera().catch((e) => toast(cameraError(e))));
 
 const plateBtn = $<HTMLButtonElement>("plate");
 plateBtn.onclick = () => {
@@ -429,12 +445,12 @@ plateBtn.onclick = () => {
   const tick = () => {
     if (left === 0) {
       stage.capturePlate();
-      label.textContent = "Recapture empty room";
+      label.textContent = "Show it the room again";
       plateBtn.disabled = false;
-      toast("Room captured. Turn on Paint me out.");
+      toast("Got the room. You'll vanish cleanly from the first frame now.");
       return;
     }
-    label.textContent = `Get out of frame… ${left}`;
+    label.textContent = `Step out of frame… ${left}`;
     left--;
     setTimeout(tick, 1000);
   };

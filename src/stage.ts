@@ -6,32 +6,11 @@ import { MeshoptDecoder } from "three/examples/jsm/libs/meshopt_decoder.module.j
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 import { Avatar, type PersonFrame } from "./avatar";
 import { FOV_Y_DEG } from "./geometry";
+import { COMPOSITE, Vanish } from "./vanish";
 
 const BG_VERT = /* glsl */ `
   varying vec2 vUv;
   void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }
-`;
-const BG_FRAG = /* glsl */ `
-  uniform sampler2D cam;
-  uniform sampler2D plate;
-  uniform sampler2D mask;
-  uniform float cloak;
-  uniform vec2 texel;
-  varying vec2 vUv;
-  void main() {
-    vec2 uv = vec2(vUv.x, 1.0 - vUv.y); // every source here is uploaded top row first
-    vec4 c = texture2D(cam, uv);
-    if (cloak > 0.0) {
-      // Grow the mask a few pixels so no outline of the wearer survives around the hero.
-      float m = 0.0;
-      for (int i = -2; i <= 2; i++)
-        for (int j = -2; j <= 2; j++)
-          m = max(m, texture2D(mask, uv + vec2(float(i), float(j)) * texel * 3.0).r);
-      c = mix(c, texture2D(plate, uv), smoothstep(0.25, 0.75, m) * cloak);
-    }
-    gl_FragColor = c;
-    #include <colorspace_fragment>
-  }
 `;
 
 export class Stage {
@@ -42,10 +21,11 @@ export class Stage {
   private bgScene = new THREE.Scene();
   private bgCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
   private bg: THREE.ShaderMaterial;
-  private camTex = new THREE.Texture();
-  private shown: ImageBitmap | null = null;
-  private plateTex: THREE.Texture | null = null;
+  private camTex: THREE.VideoTexture;
   private maskTex: THREE.DataTexture | null = null;
+  private maskUniforms: { mask: THREE.IUniform; maskTexel: THREE.IUniform; hasMask: THREE.IUniform };
+  private vanishFx: Vanish;
+  private lastMask: Uint8Array | null = null;
   private hemi = new THREE.HemisphereLight(0xffffff, 0x404040, 1);
   private key = new THREE.DirectionalLight(0xffffff, 1.6);
   private avatar: Avatar | null = null;
@@ -53,7 +33,10 @@ export class Stage {
   private probe = document.createElement("canvas").getContext("2d", { willReadFrequently: true })!;
   private frame = 0;
   private readBuf: Uint8Array | null = null;
-  cloak = false;
+  /** paint the wearer out of the picture */
+  vanish = true;
+  /** set when tracking sees nobody, so the whole frame is safe to learn as background */
+  empty = false;
   /** 0..1, fades the hero in when a suit is applied */
   reveal = 1;
 
@@ -70,16 +53,16 @@ export class Stage {
     this.scene.add(this.hemi, this.key, this.key.target);
     this.key.position.set(1, 2, 2);
 
+    this.camTex = new THREE.VideoTexture(video);
     this.camTex.colorSpace = THREE.SRGBColorSpace;
-    this.camTex.flipY = false;
-    this.camTex.generateMipmaps = false;
-    this.camTex.minFilter = THREE.LinearFilter;
     const dummy = new THREE.DataTexture(new Uint8Array([0, 0, 0, 0]), 1, 1);
     dummy.needsUpdate = true;
+    this.maskUniforms = { mask: { value: dummy }, maskTexel: { value: new THREE.Vector2(1 / 640, 1 / 480) }, hasMask: { value: 0 } };
+    this.vanishFx = new Vanish(this.renderer, this.maskUniforms, this.camTex);
     this.bg = new THREE.ShaderMaterial({
       vertexShader: BG_VERT,
-      fragmentShader: BG_FRAG,
-      uniforms: { cam: { value: this.camTex }, plate: { value: dummy }, mask: { value: dummy }, cloak: { value: 0 }, texel: { value: new THREE.Vector2(1 / 640, 1 / 480) } },
+      fragmentShader: COMPOSITE,
+      uniforms: { cam: { value: this.camTex }, plate: { value: dummy }, vanish: { value: 0 }, seed: { value: 0 }, person: { value: dummy }, hasMask: this.maskUniforms.hasMask },
       depthTest: false,
       depthWrite: false,
     });
@@ -92,7 +75,7 @@ export class Stage {
     this.renderer.setSize(w, h, false);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
-    this.bg.uniforms.texel.value.set(1 / w, 1 / h);
+
   }
 
   async loadHero(url: string, opts?: Avatar["opts"]) {
@@ -118,45 +101,41 @@ export class Stage {
     return this.avatar;
   }
 
-  /** The camera frame to draw next. Takes ownership and closes the previous one. */
-  setFrame(bitmap: ImageBitmap) {
-    this.camTex.image = bitmap;
-    this.camTex.needsUpdate = true;
-    this.shown?.close();
-    this.shown = bitmap;
-  }
-
-  /** Freezes the current camera frame as the empty-room plate the cloak paints from. */
+  /** Teaches the plate the room in one go from a frame with nobody in it. */
   capturePlate() {
     const c = document.createElement("canvas");
     c.width = this.video.videoWidth;
     c.height = this.video.videoHeight;
     c.getContext("2d")!.drawImage(this.video, 0, 0);
-    this.plateTex?.dispose();
-    this.plateTex = new THREE.CanvasTexture(c);
-    this.plateTex.flipY = false;
-    this.plateTex.colorSpace = THREE.SRGBColorSpace;
-    this.bg.uniforms.plate.value = this.plateTex;
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    this.vanishFx.seed(tex);
+    tex.dispose();
   }
 
-  get hasPlate() {
-    return !!this.plateTex;
+  /** Forget the learned room (after switching cameras). */
+  resetPlate() {
+    this.vanishFx.clear();
   }
 
   setMask(mask?: { data: Uint8Array; width: number; height: number }) {
     if (!mask) {
-      this.bg.uniforms.cloak.value = 0;
+      this.maskUniforms.hasMask.value = 0;
       return;
     }
     if (!this.maskTex || this.maskTex.image.width !== mask.width || this.maskTex.image.height !== mask.height) {
       this.maskTex?.dispose();
       this.maskTex = new THREE.DataTexture(new Uint8Array(mask.width * mask.height), mask.width, mask.height, THREE.RedFormat);
       this.maskTex.magFilter = this.maskTex.minFilter = THREE.LinearFilter;
-      this.bg.uniforms.mask.value = this.maskTex;
+      this.maskUniforms.mask.value = this.maskTex;
+      this.maskUniforms.maskTexel.value.set(1 / mask.width, 1 / mask.height);
     }
-    (this.maskTex.image.data as Uint8Array).set(mask.data);
-    this.maskTex.needsUpdate = true;
-    this.bg.uniforms.cloak.value = this.cloak && this.plateTex ? 1 : 0;
+    if (mask.data !== this.lastMask) {
+      (this.maskTex.image.data as Uint8Array).set(mask.data);
+      this.maskTex.needsUpdate = true;
+      this.lastMask = mask.data;
+    }
+    this.maskUniforms.hasMask.value = 1;
   }
 
   /** Matches the hero's lighting to the room: overall colour, brightness and which side is lit. */
@@ -205,6 +184,14 @@ export class Stage {
       }
       setOpacity(a.root, this.reveal);
     }
+    // Learn the room only when we know where people are: with their mask, or when nobody is in frame.
+    if (this.vanish && (this.maskUniforms.hasMask.value || this.empty)) {
+      this.bg.uniforms.plate.value = this.vanishFx.update();
+      this.bg.uniforms.person.value = this.vanishFx.personTexture;
+      this.bg.uniforms.seed.value = (this.frame % 64) * 1.37;
+    }
+    this.bg.uniforms.vanish.value = this.vanish && this.maskUniforms.hasMask.value ? 1 : 0;
+    this.renderer.setRenderTarget(null);
     this.renderer.clear();
     this.renderer.render(this.bgScene, this.bgCam);
     this.renderer.render(this.scene, this.camera);

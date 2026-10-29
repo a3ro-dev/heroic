@@ -63,6 +63,11 @@
           <select id="camera"></select>
         </label>
         <label class="toggle">
+          <input id="hd" type="checkbox" />
+          <span>1080p</span>
+          <small>Sharper, heavier. 720p keeps 60 fps on more laptops.</small>
+        </label>
+        <label class="toggle">
           <input id="mirror" type="checkbox" checked />
           <span>Mirror my preview</span>
           <small>Only your view. Meetings always get the true image.</small>
@@ -89,14 +94,14 @@
       <section>
         <h3>Disappear</h3>
         <label class="toggle">
-          <input id="cloak" type="checkbox" />
-          <span>Paint me out</span>
-          <small>Fills in around the hero with your empty room, so only the hero is visible.</small>
+          <input id="vanish" type="checkbox" checked />
+          <span>Vanish behind the hero</span>
+          <small>Paints you out wherever the suit doesn't cover you, using the room it learns as you move.</small>
         </label>
         <button id="plate" class="btn quiet">
-          <i data-lucide="scan-line"></i><span id="plate-label">Capture empty room</span>
+          <i data-lucide="scan-line"></i><span id="plate-label">Show it the empty room</span>
         </button>
-        <p class="hint" id="plate-hint">Step out of frame, then capture. Five seconds to get clear.</p>
+        <p class="hint">Optional. Step out of frame for a clean result from the first second instead of after you've moved around.</p>
       </section>
 
       <section id="vcam-help">
