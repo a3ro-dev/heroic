@@ -133,7 +133,7 @@ svg.lucide {
   top: calc(100% + 8px);
   padding: 3px 8px;
   border-radius: 6px;
-  background: var(--glass);
+  background: rgb(14 14 16 / 0.86);
   backdrop-filter: blur(12px);
   font: 500 12px/1.4 var(--sans);
   white-space: nowrap;
