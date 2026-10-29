@@ -263,7 +263,8 @@ export class Tracker {
       const world = pose.worldLandmarks[poseIdx].map((p) => toCam(p));
       this.fWorld.filter(world, t);
       this.fNdc.filter(lm as V3[], t, 2);
-      const vis = lm.map((p) => p.visibility ?? 0);
+      // MediaPipe guesses joints outside the picture with real-looking confidence; treat them as unseen.
+      const vis = lm.map((p) => (p.x < -0.02 || p.x > 1.02 || p.y < -0.02 || p.y > 1.02 ? 0 : (p.visibility ?? 0)));
       const ndc = lm.map((p) => toNdc(p.x, p.y));
       // Torso and head points anchor the solve; limbs move too much relative to the hips.
       const anchorIds = new Set([0, 2, 5, 7, 8, 11, 12, 23, 24]);

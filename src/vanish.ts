@@ -22,8 +22,9 @@ const DILATE = /* glsl */ `
     float m = 0.0;
     for (int i = -2; i <= 2; i++)
       for (int j = -2; j <= 2; j++)
-        m = max(m, texture2D(mask, muv + vec2(float(i), float(j)) * maskTexel * 4.0).r);
-    gl_FragColor = vec4(smoothstep(0.2, 0.6, m), 0.0, 0.0, 1.0);
+        m = max(m, texture2D(mask, muv + vec2(float(i), float(j)) * maskTexel * 5.0).r);
+    // hair and fast motion fall just outside the model's mask, so lean generous
+    gl_FragColor = vec4(smoothstep(0.08, 0.45, m), 0.0, 0.0, 1.0);
   }
 `;
 
