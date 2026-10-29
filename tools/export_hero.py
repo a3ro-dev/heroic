@@ -16,6 +16,23 @@ out_path = argv[0]
 lod_name = argv[1] if len(argv) > 1 else "LOD1"
 
 scene = bpy.context.scene
+
+# Textures often point at the artist's own drive. Relink missing ones by file name from anywhere
+# under the folder holding the .blend.
+import os
+
+blend_dir = os.path.dirname(bpy.data.filepath)
+on_disk = {}
+for root, _, files in os.walk(blend_dir):
+    for f in files:
+        on_disk.setdefault(f.lower(), os.path.join(root, f))
+for img in bpy.data.images:
+    if img.source != "FILE" or img.packed_file or img.has_data:
+        continue
+    name = os.path.basename(img.filepath.replace("\\", "/")).lower()
+    if name in on_disk:
+        img.filepath = on_disk[name]
+        img.reload()
 lod_cols = [c for c in bpy.data.collections if c.name.upper().startswith("LOD")]
 
 
@@ -35,7 +52,7 @@ def unhide(lc):
 unhide(bpy.context.view_layer.layer_collection)
 
 meshes = []
-for o in scene.objects:
+for o in set(scene.objects):
     if o.type != "MESH" or in_wrong_lod(o):
         continue
     arm_mods = [m for m in o.modifiers if m.type == "ARMATURE" and m.object]
@@ -129,7 +146,10 @@ def is_under(o, n):
 
 
 roots = [n for n in deform if not parents[n]]
-root = max(roots, key=lambda n: sum(1 for o in deform if is_under(o, n)))
+named = [n for n in roots if re.search(r"(^|[^a-z])(root|hips?|pelvis)([^a-z]|$)", n.lower())]
+root = min(named, key=lambda n: ebones[n].head.z) if named else max(
+    roots, key=lambda n: sum(1 for o in deform if is_under(o, n))
+)
 for name in roots:
     if name == root:
         continue
@@ -138,10 +158,26 @@ for name in roots:
     for other in deform:
         if other == name or is_under(other, name):
             continue
-        d = min((ebones[other].tail - head).length, (ebones[other].head - head).length)
+        # a joint usually starts where its parent ends; a shared head is a weaker hint
+        d = min((ebones[other].tail - head).length, (ebones[other].head - head).length * 1.5)
         if d < dist:
             best, dist = other, d
     parents[name] = best
+
+# A name walk can land too high up (ARP feet resolve to the root). If another deform bone ends
+# exactly where this one starts, that bone is the real parent.
+for name in deform:
+    if name == root:
+        continue
+    head = ebones[name].head
+    eps = max(ebones[name].length * 0.02, 1e-5)
+    cur = parents[name]
+    if cur and (ebones[cur].tail - head).length < eps:
+        continue
+    for other in deform:
+        if other != name and not is_under(other, name) and (ebones[other].tail - head).length < eps:
+            parents[name] = other
+            break
 
 for name, p in parents.items():
     eb = ebones[name]
@@ -208,6 +244,8 @@ def simplify(mat):
     if "base" not in imgs:
         return
     print("  rebuilding", mat.name, {k: v.name for k, v in imgs.items()})
+    # Only keep transparency if the original shader used it; some colour maps carry unrelated masks in alpha.
+    had_alpha = any(l.to_node.type == "BSDF_PRINCIPLED" and l.to_socket.name == "Alpha" for l in nt.links)
     nt.nodes.clear()
     out = nt.nodes.new("ShaderNodeOutputMaterial")
     bsdf = nt.nodes.new("ShaderNodeBsdfPrincipled")
@@ -222,7 +260,7 @@ def simplify(mat):
 
     base = tex(imgs["base"])
     nt.links.new(base.outputs["Color"], bsdf.inputs["Base Color"])
-    if mat.blend_method != "OPAQUE" or getattr(mat, "surface_render_method", "") == "BLENDED":
+    if had_alpha:
         nt.links.new(base.outputs["Alpha"], bsdf.inputs["Alpha"])
     if "normal" in imgs:
         nm = nt.nodes.new("ShaderNodeNormalMap")
