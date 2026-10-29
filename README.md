@@ -23,6 +23,8 @@ Audio isn't touched. Only the video changes.
 
 Close OBS's own virtual camera before going live; only one app can feed it at a time.
 
+On Android, grab `heroic-android.apk` from the [android-nightly release](https://github.com/a3ro-dev/heroic/releases/tag/android-nightly) once. After that the app checks for a newer build each time it opens (Settings → Updates) and asks before installing.
+
 ## Settings worth knowing
 
 - **Vanish behind the hero** (on by default). Heroic learns what your room looks like as you move and uses it to paint you out around the suit. If you want it clean from the first second, use **Show it the empty room** and step out of frame for five seconds.
