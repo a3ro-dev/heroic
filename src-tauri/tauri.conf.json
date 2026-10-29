@@ -19,7 +19,7 @@
         "minHeight": 520,
         "backgroundColor": "#0d0d0e",
         "backgroundThrottling": "disabled",
-        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection,CalculateNativeWinOcclusion --disable-background-timer-throttling --disable-renderer-backgrounding --disable-backgrounding-occluded-windows --use-fake-ui-for-media-stream"
+        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection,CalculateNativeWinOcclusion --disable-background-timer-throttling --disable-renderer-backgrounding --disable-backgrounding-occluded-windows --use-fake-ui-for-media-stream --force_high_performance_gpu"
       }
     ],
     "security": {
