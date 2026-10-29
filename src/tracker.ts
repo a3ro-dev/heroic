@@ -1,9 +1,20 @@
-// Talks to the vision worker, keeps hold of the chosen person across frames, and turns their
-// landmarks into a smoothed camera-space PersonFrame.
-type NormalizedLandmark = { x: number; y: number; z: number; visibility?: number };
+// Runs MediaPipe body, face and hand tracking on the GPU, keeps hold of the chosen person across
+// frames, and turns their landmarks into a smoothed camera-space PersonFrame.
+//
+// The models run on the main thread, spread across frames (body on one, face and hands on the
+// next) so no single frame carries more than ~15 ms. A worker was 2-3x slower per model in
+// Chromium's offscreen GL path, so it isn't used.
+import {
+  FaceLandmarker,
+  FilesetResolver,
+  HandLandmarker,
+  PoseLandmarker,
+  type FaceLandmarkerResult,
+  type HandLandmarkerResult,
+  type NormalizedLandmark,
+} from "@mediapipe/tasks-vision";
 import * as THREE from "three";
 import type { PersonFrame } from "./avatar";
-import type { FromWorker, VisionResult } from "./vision";
 import { JointFilter, OneEuro } from "./filters";
 import { focal, solveTranslation, toCam, toNdc, unproject, type V3 } from "./geometry";
 
@@ -25,6 +36,22 @@ export interface TrackResult {
   mask?: { data: Uint8Array; width: number; height: number };
 }
 
+interface VisionResult {
+  pose: { landmarks: NormalizedLandmark[][]; world: { x: number; y: number; z: number }[][] };
+  face: Pick<FaceLandmarkerResult, "faceLandmarks" | "faceBlendshapes" | "facialTransformationMatrixes">;
+  hands: Pick<HandLandmarkerResult, "landmarks" | "worldLandmarks">;
+  masks: ({ data: Uint8Array; width: number; height: number } | null)[];
+}
+
+async function create<T>(make: (delegate: "GPU" | "CPU") => Promise<T>): Promise<T> {
+  try {
+    return await make("GPU");
+  } catch (e) {
+    console.warn("GPU delegate failed, using CPU", e);
+    return make("CPU");
+  }
+}
+
 const boxOf = (lm: NormalizedLandmark[], ids?: number[]) => {
   let x0 = 1, y0 = 1, x1 = 0, y1 = 0;
   for (const i of ids ?? lm.keys()) {
@@ -38,11 +65,21 @@ const boxOf = (lm: NormalizedLandmark[], ids?: number[]) => {
 };
 
 export class Tracker {
-  private worker = new Worker("/vision.worker.js");
+  private pose!: PoseLandmarker;
+  private face!: FaceLandmarker;
+  private hands!: HandLandmarker;
   private wantMask = false;
   readonly timing = { pose: 0, face: 0, hands: 0 };
   private lastT = -1;
-  private waiting: ((r: VisionResult | null) => void) | null = null;
+  private frame = 0;
+  private small = document.createElement("canvas");
+  private smallCtx = this.small.getContext("2d")!;
+  private latest: VisionResult = {
+    pose: { landmarks: [], world: [] },
+    face: { faceLandmarks: [], faceBlendshapes: [], facialTransformationMatrixes: [] },
+    hands: { landmarks: [], worldLandmarks: [] },
+    masks: [],
+  };
 
   // who we're following
   private target: { cx: number; cy: number } | null = null;
@@ -59,32 +96,36 @@ export class Tracker {
   private fBlend = new Map<string, OneEuro>();
   private qPrev = new THREE.Quaternion();
 
-  init(onProgress: (msg: string) => void) {
-    return new Promise<void>((resolve, reject) => {
-      this.worker.onmessage = (e: MessageEvent<FromWorker>) => {
-        const m = e.data;
-        if (m.type === "progress") onProgress(m.msg);
-        else if (m.type === "ready") resolve();
-        else if (m.type === "error") {
-          if (this.waiting) this.finish(null);
-          else reject(new Error(m.msg));
-          console.error("vision:", m.msg);
-        } else if (m.type === "result") this.finish(m.result);
-      };
-      this.worker.onerror = (e) => reject(new Error(e.message || "The vision worker failed to start."));
-      // the worker resolves models relative to the page, which is tauri://… or http://… depending on platform
-      this.worker.postMessage({ type: "init", base: location.origin });
-    });
-  }
-
-  private finish(r: VisionResult | null) {
-    const w = this.waiting;
-    this.waiting = null;
-    w?.(r);
-  }
-
-  get busy() {
-    return !!this.waiting;
+  async init(onProgress: (msg: string) => void) {
+    onProgress("Loading vision runtime");
+    const files = await FilesetResolver.forVisionTasks(`${location.origin}/wasm`);
+    onProgress("Loading body tracker");
+    this.pose = await create((delegate) =>
+      PoseLandmarker.createFromOptions(files, {
+        baseOptions: { modelAssetPath: "/models/pose_landmarker_full.task", delegate },
+        runningMode: "VIDEO",
+        numPoses: 2,
+        outputSegmentationMasks: this.wantMask,
+      }),
+    );
+    onProgress("Loading face tracker");
+    this.face = await create((delegate) =>
+      FaceLandmarker.createFromOptions(files, {
+        baseOptions: { modelAssetPath: "/models/face_landmarker.task", delegate },
+        runningMode: "VIDEO",
+        numFaces: 2,
+        outputFaceBlendshapes: true,
+        outputFacialTransformationMatrixes: true,
+      }),
+    );
+    onProgress("Loading hand tracker");
+    this.hands = await create((delegate) =>
+      HandLandmarker.createFromOptions(files, {
+        baseOptions: { modelAssetPath: "/models/hand_landmarker.task", delegate },
+        runningMode: "VIDEO",
+        numHands: 2,
+      }),
+    );
   }
 
   /** 0 = loose and responsive, 1 = very steady. */
@@ -99,9 +140,9 @@ export class Tracker {
     this.fT.minCutoff = c * 0.75;
   }
 
-  setMask(on: boolean) {
+  async setMask(on: boolean) {
     this.wantMask = on;
-    this.worker.postMessage({ type: "mask", on });
+    await this.pose?.setOptions({ outputSegmentationMasks: on });
   }
 
   /** Lock onto whoever is under this normalized image point. */
@@ -133,17 +174,35 @@ export class Tracker {
     this.fBlend.clear();
   }
 
-  /** Sends one frame to the worker. Resolves with the tracked person for exactly that frame. */
-  async track(bitmap: ImageBitmap, nowMs: number, aspect: number): Promise<TrackResult | null> {
+  /** Runs this frame's share of the models on the video and returns the tracked person. */
+  track(video: HTMLVideoElement, nowMs: number): TrackResult {
     if (nowMs <= this.lastT) nowMs = this.lastT + 1; // MediaPipe needs strictly increasing timestamps
     this.lastT = nowMs;
-    const r = await new Promise<VisionResult | null>((resolve) => {
-      this.waiting = resolve;
-      this.worker.postMessage({ type: "frame", bitmap, t: nowMs }, [bitmap]);
-    });
-    if (!r) return null;
-    for (const k of ["pose", "face", "hands"] as const) this.timing[k] += (r.ms[k] - this.timing[k]) * 0.1;
-    return this.process(r, nowMs / 1000, aspect);
+    const L = this.latest;
+    const ema = (k: keyof Tracker["timing"], since: number) => (this.timing[k] += (performance.now() - since - this.timing[k]) * 0.1);
+    const t0 = performance.now();
+    if (this.frame++ % 2 === 0) {
+      // The body model works at 256 px inside; a small copy makes its person mask (and the
+      // GPU readback of it) about 7x cheaper with no loss in landmark quality.
+      const sw = 480, sh = Math.round((480 * video.videoHeight) / video.videoWidth);
+      if (this.small.width !== sw || this.small.height !== sh) Object.assign(this.small, { width: sw, height: sh });
+      this.smallCtx.drawImage(video, 0, 0, sw, sh);
+      const p = this.pose.detectForVideo(this.small, nowMs);
+      L.pose = { landmarks: p.landmarks, world: p.worldLandmarks };
+      L.masks = (p.segmentationMasks ?? []).map((m) => {
+        const out = this.wantMask ? { data: m.getAsUint8Array(), width: m.width, height: m.height } : null;
+        m.close();
+        return out;
+      });
+      ema("pose", t0);
+    } else {
+      L.face = this.face.detectForVideo(video, nowMs);
+      ema("face", t0);
+      const t1 = performance.now();
+      L.hands = this.hands.detectForVideo(video, nowMs);
+      ema("hands", t1);
+    }
+    return this.process(L, nowMs / 1000, video.videoWidth / video.videoHeight);
   }
 
   private process(r: VisionResult, t: number, aspect: number): TrackResult {

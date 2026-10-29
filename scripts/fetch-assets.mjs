@@ -2,7 +2,6 @@
 import { cpSync, existsSync, writeFileSync } from "node:fs";
 
 cpSync("node_modules/@mediapipe/tasks-vision/wasm", "public/wasm", { recursive: true });
-cpSync("node_modules/@mediapipe/tasks-vision/vision_bundle.cjs", "public/wasm/vision_bundle.cjs");
 
 const base = "https://storage.googleapis.com/mediapipe-models";
 const models = {
