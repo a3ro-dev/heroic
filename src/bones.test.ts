@@ -29,6 +29,7 @@ test("side and core parsing", () => {
 for (const [file, expect] of Object.entries({
   "public/heroes/hulk.glb": ["DEF-Hips", "DEF-Neck", "DEF-Head", "DEF-Jaw", "DEF-UpperArm_1.L", "DEF-Forearm_1.L", "DEF-Hand.L", "DEF-Thigh_1.R", "DEF-Knee_1.R", "DEF-Foot.R"],
   "public/heroes/infinity-ultron.glb": ["Bip001 Pelvis", "Bip001 Neck", "Bip001 Head", "-", "Bip001 L UpperArm", "Bip001 L Forearm", "Bip001 L Hand", "Bip001 R Thigh", "Bip001 R Calf", "Bip001 R Foot"],
+  "public/heroes/spider-man.glb": ["root.x", "neck.x", "head.x", "-", "arm_stretch.l", "forearm_stretch.l", "hand.l", "thigh_stretch.r", "leg_stretch.r", "foot.r"],
   "public/heroes/ultron-prime.glb": ["root hips", "head neck lower", "head neck upper", "head jaw", "arm left shoulder 2", "arm left elbow", "arm left wrist", "leg right thigh", "leg right knee", "leg right ankle"],
 })) {
   test(`maps ${file}`, () => {

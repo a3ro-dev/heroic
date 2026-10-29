@@ -54,7 +54,7 @@ export function parseName(raw: string): { side?: Side; tokens: string[]; core: s
       // biped glues the side: "RThighTwist", "LUpArmTwist"
       side ??= t[0] === "l" ? "L" : "R";
       out.push(t.slice(1));
-    } else out.push(t);
+    } else if (t !== "x" && t !== "stretch") out.push(t); // Auto-Rig Pro: "spine_01.x", "arm_stretch.l"
   }
   tokens = out;
   return { side, tokens, core: tokens.join(" ") };
@@ -125,10 +125,10 @@ export function mapBones(bones: BoneInfo[]): BoneMap {
         ? "foreArm"
         : /arm|upper|shoulder/.test(p.core)
           ? "upperArm"
-          : /calf|knee|shin/.test(p.core)
-            ? "leg"
-            : /thigh|leg/.test(p.core)
-              ? "upLeg"
+          : /thigh|up ?leg/.test(p.core)
+            ? "upLeg"
+            : /calf|knee|shin|leg/.test(p.core)
+              ? "leg"
               : undefined;
       if (slot) followers.push({ bone: i, slot });
     });
