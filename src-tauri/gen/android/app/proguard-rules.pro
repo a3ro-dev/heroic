@@ -19,3 +19,7 @@
 # If you keep the line number information, uncomment this to
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
+# The page calls these through window.HeroicUpdater
+-keepclassmembers class dev.akshat.heroic.Updater {
+   @android.webkit.JavascriptInterface <methods>;
+}

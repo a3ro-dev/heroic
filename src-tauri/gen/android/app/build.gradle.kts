@@ -41,6 +41,8 @@ android {
             }
         }
         getByName("release") {
+            // signed with the debug key so release builds install over (and self-update from) debug ones
+            signingConfig = signingConfigs.getByName("debug")
             optimization {
                enable = true
             }
