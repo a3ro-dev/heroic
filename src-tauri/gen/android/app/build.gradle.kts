@@ -24,8 +24,6 @@ android {
         targetSdk = 37
         versionCode = tauriProperties.getProperty("tauri.android.versionCode", "1").toInt()
         versionName = tauriProperties.getProperty("tauri.android.versionName", "1.0")
-        // read-only token for self-update from the private repo's releases; empty = updates off
-        buildConfigField("String", "UPDATE_TOKEN", "\"${System.getenv("HEROIC_UPDATE_TOKEN") ?: ""}\"")
     }
     buildTypes {
         getByName("debug") {

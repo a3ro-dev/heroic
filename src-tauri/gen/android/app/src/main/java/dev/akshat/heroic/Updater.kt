@@ -18,16 +18,15 @@ import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.concurrent.thread
 
 /**
- * Self-update from the repo's `android-nightly` release. The repo is private, so CI bakes a
- * read-only token into the build (HEROIC_UPDATE_TOKEN). Android asks the user to confirm each
- * install, and only accepts APKs signed with the same key as the installed one.
+ * Self-update from the public repo's `android-nightly` release. Android asks the user to confirm
+ * each install, and only accepts APKs signed with the same key as the installed one.
  * The page reaches this as `window.HeroicUpdater`; progress comes back through `window.onHeroicUpdate`.
  */
 class Updater(private val activity: Activity, private val webView: WebView) {
   private val busy = AtomicBoolean(false)
 
   @JavascriptInterface
-  fun available() = BuildConfig.UPDATE_TOKEN.isNotEmpty()
+  fun available() = true
 
   @JavascriptInterface
   fun build() = BuildConfig.VERSION_CODE
@@ -35,7 +34,6 @@ class Updater(private val activity: Activity, private val webView: WebView) {
   /** quiet: only speak up when there is an update (used for the check on launch). */
   @JavascriptInterface
   fun check(quiet: Boolean) {
-    if (!available()) return report("error", "This build can't update itself")
     if (!busy.compareAndSet(false, true)) return
     thread {
       try {
@@ -60,14 +58,9 @@ class Updater(private val activity: Activity, private val webView: WebView) {
 
   private fun open(url: String, accept: String): InputStream {
     val c = URL(url).openConnection() as HttpURLConnection
-    c.instanceFollowRedirects = false
-    c.setRequestProperty("Authorization", "Bearer ${BuildConfig.UPDATE_TOKEN}")
     c.setRequestProperty("Accept", accept)
     c.setRequestProperty("X-GitHub-Api-Version", "2022-11-28")
-    val code = c.responseCode
-    // assets redirect to a signed storage URL, which must not receive our token
-    if (code in 300..399) return URL(c.getHeaderField("Location")).openStream()
-    if (code != 200) throw IOException("GitHub answered $code")
+    if (c.responseCode != 200) throw IOException("GitHub answered ${c.responseCode}")
     return c.inputStream
   }
 
