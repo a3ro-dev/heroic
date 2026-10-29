@@ -23,7 +23,7 @@ export class Stage {
   private bg: THREE.ShaderMaterial;
   private camTex: THREE.VideoTexture;
   private maskTex: THREE.DataTexture | null = null;
-  private maskUniforms: { mask: THREE.IUniform; maskTexel: THREE.IUniform; hasMask: THREE.IUniform };
+  private maskUniforms: { mask: THREE.IUniform; maskTexel: THREE.IUniform; hasMask: THREE.IUniform; box: THREE.IUniform };
   private vanishFx: Vanish;
   private lastMask: Uint8Array | null = null;
   private hemi = new THREE.HemisphereLight(0xffffff, 0x404040, 1);
@@ -57,7 +57,7 @@ export class Stage {
     this.camTex.colorSpace = THREE.SRGBColorSpace;
     const dummy = new THREE.DataTexture(new Uint8Array([0, 0, 0, 0]), 1, 1);
     dummy.needsUpdate = true;
-    this.maskUniforms = { mask: { value: dummy }, maskTexel: { value: new THREE.Vector2(1 / 640, 1 / 480) }, hasMask: { value: 0 } };
+    this.maskUniforms = { mask: { value: dummy }, maskTexel: { value: new THREE.Vector2(1 / 640, 1 / 480) }, hasMask: { value: 0 }, box: { value: new THREE.Vector4(-1, -1, 2, 2) } };
     this.vanishFx = new Vanish(this.renderer, this.maskUniforms, this.camTex);
     this.bg = new THREE.ShaderMaterial({
       vertexShader: BG_VERT,
@@ -118,7 +118,10 @@ export class Stage {
     this.vanishFx.clear();
   }
 
-  setMask(mask?: { data: Uint8Array; width: number; height: number }) {
+  /** `box` (normalized image coords) limits a whole-frame matte to the chosen person. */
+  setMask(mask?: { data: Uint8Array; width: number; height: number }, box?: { x0: number; y0: number; x1: number; y1: number }) {
+    if (box) this.maskUniforms.box.value.set(box.x0, box.y0, box.x1, box.y1);
+    else this.maskUniforms.box.value.set(-1, -1, 2, 2);
     if (!mask) {
       this.maskUniforms.hasMask.value = 0;
       return;

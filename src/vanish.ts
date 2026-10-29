@@ -16,15 +16,18 @@ const VERT = /* glsl */ `
 const DILATE = /* glsl */ `
   uniform sampler2D mask;
   uniform vec2 maskTexel;
+  uniform vec4 box; // x0, y0, x1, y1 in mask uv: only the chosen person vanishes
   varying vec2 vUv;
   void main() {
     vec2 muv = vec2(vUv.x, 1.0 - vUv.y); // mask rows arrive top first
+    vec2 out2 = max(box.xy - muv, muv - box.zw);
+    float inBox = 1.0 - smoothstep(0.0, 0.04, max(out2.x, out2.y));
     float m = 0.0;
     for (int i = -2; i <= 2; i++)
       for (int j = -2; j <= 2; j++)
         m = max(m, texture2D(mask, muv + vec2(float(i), float(j)) * maskTexel * 5.0).r);
     // hair and fast motion fall just outside the model's mask, so lean generous
-    gl_FragColor = vec4(smoothstep(0.08, 0.45, m), 0.0, 0.0, 1.0);
+    gl_FragColor = vec4(smoothstep(0.08, 0.45, m) * inBox, 0.0, 0.0, 1.0);
   }
 `;
 
@@ -122,12 +125,12 @@ export class Vanish {
 
   constructor(
     private renderer: THREE.WebGLRenderer,
-    private maskUniforms: { mask: THREE.IUniform; maskTexel: THREE.IUniform; hasMask: THREE.IUniform },
+    private maskUniforms: { mask: THREE.IUniform; maskTexel: THREE.IUniform; hasMask: THREE.IUniform; box: THREE.IUniform },
     camTex: THREE.Texture,
   ) {
     const mk = (fragmentShader: string, uniforms: Record<string, THREE.IUniform>) =>
       new THREE.ShaderMaterial({ vertexShader: VERT, fragmentShader, uniforms, depthTest: false, depthWrite: false });
-    this.dilate = mk(DILATE, { mask: maskUniforms.mask, maskTexel: maskUniforms.maskTexel });
+    this.dilate = mk(DILATE, { mask: maskUniforms.mask, maskTexel: maskUniforms.maskTexel, box: maskUniforms.box });
     this.learn = mk(LEARN, { cam: { value: camTex }, prev: { value: null }, rate: { value: 0.05 }, person: { value: this.personRT.texture }, hasMask: maskUniforms.hasMask });
     this.premult = mk(PREMULT, { src: { value: null } });
     this.down = mk(DOWN, { src: { value: null } });

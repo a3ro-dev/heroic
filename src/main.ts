@@ -2,6 +2,7 @@ import "./style.css";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { createIcons, Plus, ScanLine, Settings2, X } from "lucide";
 import { HEROES, type Hero } from "./heroes";
+import { Matte } from "./matte";
 import { Stage } from "./stage";
 import { Tracker, type Candidate, type TrackResult } from "./tracker";
 
@@ -45,6 +46,7 @@ function toast(msg: string, ms = 4200) {
 const stage = new Stage(video);
 view.append(stage.canvas);
 const tracker = new Tracker();
+const matte = new Matte();
 
 function bootStep(msg: string) {
   $("boot-step").textContent = msg;
@@ -118,6 +120,8 @@ async function boot() {
   try {
     await tracker.init(bootStep);
     tracker.stability = prefs.stability;
+    bootStep("Loading the person matte");
+    if (await matte.init()) await tracker.setMask(false); // the matte replaces the body model's mask
     bootStep("Fitting the suit");
     await wear(HEROES.find((h) => h.id === prefs.hero) ?? HEROES[0]);
   } catch (e) {
@@ -266,7 +270,14 @@ function sweep() {
 let fps = 0;
 let lastFrameAt = performance.now();
 const stats = { track: 0, render: 0 };
-(window as unknown as { heroic: unknown }).heroic = { stats, tracker, stage };
+(window as unknown as { heroic: unknown }).heroic = { stats, tracker, stage, matte };
+
+/** Generous region around the chosen person, so a whole-frame matte only removes them. */
+function personBox(c?: Candidate) {
+  if (!c) return undefined;
+  const w = c.box.x1 - c.box.x0, h = c.box.y1 - c.box.y0;
+  return { x0: c.box.x0 - w * 0.6, x1: c.box.x1 + w * 0.6, y0: c.box.y0 - h * 0.6, y1: 2 };
+}
 
 function draw() {
   const now = performance.now();
@@ -277,7 +288,10 @@ function draw() {
     stats.track += (performance.now() - now - stats.track) * 0.1;
     lastResult = res;
     stage.empty = res.candidates.length === 0;
-    stage.setMask(res.selected >= 0 ? res.mask : undefined);
+    if (matte.ready) {
+      if (stage.vanish) matte.push(video);
+      stage.setMask(res.selected >= 0 ? matte.latest : undefined, res.candidates.length > 1 ? personBox(res.candidates[res.selected]) : undefined);
+    } else stage.setMask(res.selected >= 0 ? res.mask : undefined);
     drawPeople(res);
   } catch (e) {
     console.error(e);
@@ -433,7 +447,7 @@ bindRange("build", "build", (v) => `${Math.round(v * 100)}%`, (v) => stage.hero 
 
 bindToggle("vanish", "vanish", (v) => {
   stage.vanish = v;
-  tracker.setMask(v).catch((e) => toast(`Couldn't start the person mask: ${e.message}`));
+  tracker.setMask(v && !matte.ready).catch((e) => toast(`Couldn't start the person mask: ${e.message}`));
 });
 bindToggle("hd", "hd", () => booted && startCamera().catch((e) => toast(cameraError(e))));
 

@@ -11,3 +11,4 @@ src-tauri/gen/schemas/
 Read+Me.txt
 public/test/
 .claude/
+public/ort/

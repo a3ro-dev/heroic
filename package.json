@@ -18,6 +18,7 @@
     "@mediapipe/tasks-vision": "^1.2.0",
     "@tauri-apps/api": "^2.12.4",
     "lucide": "^1.64.0",
+    "onnxruntime-web": "^1.31.1",
     "three": "^0.186.1"
   },
   "devDependencies": {
