@@ -68,16 +68,28 @@ async function startCamera() {
     return;
   }
   video.srcObject && (video.srcObject as MediaStream).getTracks().forEach((t) => t.stop());
-  const stream = await navigator.mediaDevices.getUserMedia({
-    audio: false,
-    video: {
-      deviceId: prefs.camera ? { exact: prefs.camera } : undefined,
-      facingMode: prefs.camera ? undefined : "user",
-      width: { ideal: prefs.hd ? 1920 : 1280 },
-      height: { ideal: prefs.hd ? 1080 : 720 },
-      frameRate: { ideal: 60 },
-    },
-  });
+  const open = (id: string) =>
+    navigator.mediaDevices.getUserMedia({
+      audio: false,
+      video: {
+        deviceId: id ? { exact: id } : undefined,
+        facingMode: id ? undefined : "user",
+        width: { ideal: prefs.hd ? 1920 : 1280 },
+        height: { ideal: prefs.hd ? 1080 : 720 },
+        frameRate: { ideal: 60 },
+      },
+    });
+  let stream: MediaStream;
+  try {
+    stream = await open(prefs.camera);
+  } catch (e) {
+    // a remembered camera can vanish (unplugged, or ids reset after a reinstall): use the default one
+    const name = (e as DOMException)?.name;
+    if (!prefs.camera || (name !== "OverconstrainedError" && name !== "NotFoundError")) throw e;
+    prefs.camera = "";
+    save();
+    stream = await open("");
+  }
   video.srcObject = stream;
   await video.play();
   stage.resetPlate();
@@ -458,6 +470,13 @@ plateBtn.onclick = () => {
 };
 
 addEventListener("resize", () => lastResult && drawPeople(lastResult));
+
+// Android ends the camera while the app is in the background; take it back on return.
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden || testSrc || !booted) return;
+  const live = (video.srcObject as MediaStream | null)?.getVideoTracks().some((t) => t.readyState === "live");
+  if (!live) startCamera().catch((e) => toast(cameraError(e)));
+});
 
 renderHeroes(prefs.hero);
 boot();
