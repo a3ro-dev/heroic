@@ -1,0 +1,10 @@
+node_modules/
+dist/
+public/wasm/
+src-tauri/target/
+src-tauri/gen/schemas/
+# raw purchased sources stay local; the app ships the converted .glb files
+*.blend
+*.blend1
+*.zip
+/textures/
