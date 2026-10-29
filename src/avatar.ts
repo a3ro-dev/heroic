@@ -119,6 +119,22 @@ export class Avatar {
       if (hand && idx && pnk) this.restHands[s] = handBasis(hand, idx, pnk, mdl ?? idx.clone().add(pnk).multiplyScalar(0.5));
     }
 
+    // Armour and pads hung off the collarbone along the arm (game rigs do this) would stay sticking
+    // out in T-pose when the arm drops. Let anything pointing down the upper arm follow it.
+    for (const sd of ["L", "R"] as const) {
+      const sm = m[sd];
+      const sh = this.bone(sm.shoulder), ua = this.bone(sm.upperArm);
+      if (!sh || !ua) continue;
+      const armDir = this.aimPoint(ua, this.bone(sm.foreArm)).clone().sub(this.rest.get(ua)!.p).normalize();
+      const taken = new Set([ua, ...sm.followers.map((f) => this.bones[f.bone])]);
+      for (const child of sh.children) {
+        const i = this.bones.indexOf(child);
+        if (i < 0 || taken.has(child)) continue;
+        const dir = this.aimPoint(child).clone().sub(this.rest.get(child)!.p).normalize();
+        if (dir.dot(armDir) > Math.cos((40 * Math.PI) / 180)) sm.followers.push({ bone: i, slot: "upperArm" });
+      }
+    }
+
     this.measureHead(skinned);
     for (const mesh of skinned) {
       if (mesh.morphTargetDictionary) {
@@ -312,7 +328,7 @@ export class Avatar {
     }
     // Sitting at a desk: knees out of view. Fold the legs into the hips rather than letting
     // standing legs dangle in front of the desk.
-    const legsSeen = W && seen(L.knee) > 0.5 ? 1 : 0;
+    const legsSeen = W && seen(L.knee) * seen(L.ankle) > 0.5 ? 1 : 0;
     this.legShow[s] += (legsSeen - this.legShow[s]) * 0.12;
     const upLeg = B(sm.upLeg);
     if (upLeg && this.legShow[s] < 0.999) {
